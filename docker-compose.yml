@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  storage-monitor:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - /path/to/data:/data
+      - /path/to/config:/config
+    environment:
+      - PUID=99
+      - PGID=100
+      - TZ=UTC
+    restart: unless-stopped
