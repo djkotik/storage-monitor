@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  storage-monitor:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - /path/to/data:/data
+    environment:
+      - NODE_ENV=production
+      - STORAGE_ALERT_THRESHOLD=90
+      - SCAN_INTERVAL=3600
+    restart: unless-stopped
