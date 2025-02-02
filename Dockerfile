@@ -15,8 +15,14 @@ COPY . .
 # Build frontend
 RUN npm run build
 
-# Create data directory
-RUN mkdir -p /data
+# Create necessary directories
+RUN mkdir -p /data /appdata
+
+# Set permissions
+RUN chown -R node:node /app /data /appdata
+
+# Switch to non-root user
+USER node
 
 # Expose port
 EXPOSE 3000
