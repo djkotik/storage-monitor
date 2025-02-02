@@ -12,7 +12,7 @@ RUN npm install
 # Copy source code
 COPY . .
 
-# Build frontend
+# Build frontend and server
 RUN npm run build
 
 # Create necessary directories
@@ -28,4 +28,4 @@ USER node
 EXPOSE 3000
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["node", "dist/server/index.js"]

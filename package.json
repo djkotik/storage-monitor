@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && tsc -p tsconfig.node.json --outDir dist/server",
     "lint": "eslint .",
     "preview": "vite preview",
-    "server": "node --loader ts-node/esm src/server/index.ts",
+    "server": "node dist/server/index.js",
     "start": "npm run build && npm run server"
   },
   "dependencies": {
