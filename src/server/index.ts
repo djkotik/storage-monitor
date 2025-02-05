@@ -23,7 +23,7 @@ async function log(level: 'info' | 'error' | 'warn', message: string, error?: un
   console.log(logWithError);
   
   // Add to in-memory log buffer
-  logBuffer.push(logMessage);
+  logBuffer.push(logWithError);
   if (logBuffer.length > maxLogLines) {
     logBuffer.shift(); // Remove the oldest log message
   }
@@ -120,7 +120,8 @@ async function initializeDatabase() {
         id TEXT PRIMARY KEY,
         path TEXT UNIQUE NOT NULL,
         size INTEGER NOT NULL DEFAULT 0,
-        items INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP
+        items INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_scan DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS storage_history (
@@ -270,7 +271,7 @@ async function updateStorageStats() {
 async function startMonitoring() {
   try {
     log('info', 'Starting monitoring service...');
-    isScanning = true;
+    isScanning = false;
     scanProgress = {
       totalItems: 0,
       scannedItems: 0,
@@ -294,12 +295,6 @@ async function startMonitoring() {
       }
     };
     
-    // Initial scan of all monitored folders
-    await updateStorageStats();
-    await Promise.all(monitoredFoldersFromDb.map(scanMonitoredFolder));
-
-    isScanning = false;
-
     // Set up file system watcher for each monitored folder
     monitoredFoldersFromDb.forEach(folder => {
       const watcher = chokidar.watch(folder.path, {
