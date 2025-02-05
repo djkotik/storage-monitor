@@ -360,19 +360,19 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '../../dist')));
 
 // API endpoint to get logs
-app.get('/api/logs', (_req, res) => {
+app.get('/api/logs', (_ , res) => {
   res.json(logBuffer);
 });
 
 // API Routes with error handling
-app.get('/api/scan/status', (_req, res) => {
+app.get('/api/scan/status', (_ , res) => {
   res.json({
     isScanning,
     progress: scanProgress
   });
 });
 
-app.get('/api/storage/stats', async (_req, res) => {
+app.get('/api/storage/stats', async (_ , res) => {
   try {
     const stats = await db.get('SELECT * FROM storage_history ORDER BY timestamp DESC LIMIT 1');
     res.json(stats);
@@ -382,7 +382,7 @@ app.get('/api/storage/stats', async (_req, res) => {
   }
 });
 
-app.get('/api/storage/history', async (_req, res) => {
+app.get('/api/storage/history', async (_ , res) => {
   try {
     const history = await db.all('SELECT * FROM storage_history ORDER BY timestamp DESC LIMIT 365');
     res.json(history.reverse());
@@ -392,7 +392,7 @@ app.get('/api/storage/history', async (_req, res) => {
   }
 });
 
-app.get('/api/files/types', async (_req, res) => {
+app.get('/api/files/types', async (_ , res) => {
   try {
     const types = await db.all(`
       SELECT type, SUM(size) as size, COUNT(*) as count
@@ -407,9 +407,9 @@ app.get('/api/files/types', async (_req, res) => {
   }
 });
 
-app.get('/api/files/duplicates', async (_req, res) => {
+app.get('/api/files/duplicates', async (_ , res) => {
   try {
-    const duplicates = await db.all('SELECT * FROM duplicate_files ORDER BY size DESC');
+    const duplicates = await db.all(`SELECT * FROM duplicate_files ORDER BY size DESC`);
     res.json(duplicates);
   } catch (error) {
     log('error', 'Failed to fetch duplicates', error);
@@ -417,7 +417,7 @@ app.get('/api/files/duplicates', async (_req, res) => {
   }
 });
 
-app.get('/api/folders', async (_req, res) => {
+app.get('/api/folders', async (_ , res) => {
   try {
     const folders = await db.all('SELECT * FROM monitored_folders');
     res.json(folders);
@@ -427,7 +427,7 @@ app.get('/api/folders', async (_req, res) => {
   }
 });
 
-app.post('/api/scan', async (req, res) => {
+app.post('/api/scan', async (_ , res) => {
   try {
     if (isScanning) {
       return res.status(409).json({ error: 'Scan already in progress' });
