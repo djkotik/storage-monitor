@@ -32,7 +32,8 @@ export function DuplicateFiles({ files }: DuplicateFilesProps) {
             </span>
           </div>
           <div className="pl-6 space-y-1">
-            {file.paths.map((path, pathIndex) => (
+            {/* Parse the JSON string to get the array of paths */}
+            {JSON.parse(file.paths).map((path: string, pathIndex: number) => (
               <div
                 key={pathIndex}
                 className="text-sm text-gray-600 dark:text-gray-400"
