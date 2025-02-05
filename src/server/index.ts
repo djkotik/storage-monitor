@@ -279,7 +279,7 @@ async function startMonitoring() {
     };
 
     // Load monitored folders from the database
-    const monitoredFoldersFromDb = await db.all('SELECT id, path FROM monitored_folders');
+    const monitoredFolders = await db.all('SELECT id, path FROM monitored_folders');
 
     // Function to scan each monitored folder
     const scanMonitoredFolder = async (folder: { id: string; path: string }) => {
@@ -294,7 +294,14 @@ async function startMonitoring() {
       }
     };
     
+    // Initial scan of all monitored folders
+    await updateStorageStats();
+    await Promise.all(monitoredFolders.map(scanMonitoredFolder));
+
+    isScanning = false;
+
     // Set up file system watcher for each monitored folder
+    const monitoredFoldersFromDb = await db.all('SELECT id, path FROM monitored_folders');
     monitoredFoldersFromDb.forEach(folder => {
       const watcher = chokidar.watch(folder.path, {
         persistent: true,
@@ -314,7 +321,7 @@ async function startMonitoring() {
         .on('add', p => log('info', `File added: ${p}`))
         .on('change', p => log('info', `File changed: ${p}`))
         .on('unlink', p => log('info', `File removed: ${p}`))
-        .on('error', error => log(`error`, `Watcher error: ${error}`));
+        .on('error', error => log(`error`, `Watcher error: ${error}`))
     });
 
     // Schedule regular scans
