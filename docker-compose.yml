@@ -1,14 +1,22 @@
 version: '3.8'
+
 services:
   storage-monitor:
     build: .
     ports:
-      - "8080:8080"
+      - "3000:3000"
     volumes:
       - /path/to/data:/data
-      - /path/to/config:/config
+      - /path/to/appdata/storage-monitor:/appdata
     environment:
-      - PUID=99
-      - PGID=100
-      - TZ=UTC
+      - NODE_ENV=production
+      - STORAGE_ALERT_THRESHOLD=90
+      - SCAN_INTERVAL=3600
+      - DB_PATH=/appdata/database.sqlite
+      - DEBUG=app:*
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

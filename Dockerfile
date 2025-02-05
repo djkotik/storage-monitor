@@ -1,24 +1,31 @@
-# Build stage for React frontend
-FROM node:18 as frontend-build
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apk add --no-cache python3 make g++
+
+# Install dependencies
+COPY package*.json ./
 RUN npm install
-COPY frontend/ ./
+
+# Copy source code
+COPY . .
+
+# Build frontend and server
 RUN npm run build
 
-# Python backend
-FROM python:3.9-slim
-WORKDIR /app
-COPY backend/requirements.txt .
-RUN pip install -r requirements.txt
+# Create necessary directories
+RUN mkdir -p /data /appdata
 
-# Copy backend code
-COPY backend/ .
+# Set permissions
+RUN chown -R node:node /app /data /appdata
 
-# Copy built frontend
-COPY --from=frontend-build /app/frontend/dist /app/static
+# Switch to non-root user
+USER node
 
-EXPOSE 8080
-VOLUME ["/data", "/config"]
+# Expose port
+EXPOSE 3000
 
-CMD ["python", "app.py"]
+# Start the application
+CMD ["node", "dist/server/index.js"]

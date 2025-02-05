@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply antialiased;
+  }
+}
+
+@layer components {
+  .card-hover {
+    @apply transition-transform hover:scale-[1.02] cursor-pointer;
+  }
+}
