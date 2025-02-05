@@ -120,7 +120,8 @@ async function initializeDatabase() {
         id TEXT PRIMARY KEY,
         path TEXT UNIQUE NOT NULL,
         size INTEGER NOT NULL DEFAULT 0,
-        items INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP
+        items INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_scan DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS storage_history (
@@ -228,35 +229,49 @@ async function scanDirectory(dirPath: string): Promise<{ size: number; items: nu
 async function updateStorageStats() {
   try {
     log('info', 'Updating storage statistics...');
-    
-    // Calculate total used and free size from monitored folders
     let totalUsedSize = 0;
+    
+    log('info', 'Fetching monitored folders from the database...');
     const folders = await db.all('SELECT size FROM monitored_folders');
-    folders.forEach(folder => {
-      totalUsedSize += folder.size;
-    });
+    log('info', `Fetched ${folders.length} monitored folders`);
 
-    // Insert the calculated used size and a placeholder for free_size
+    if (folders && folders.length > 0) {
+      log('info', 'Calculating total used size...');
+      folders.forEach(folder => {
+        totalUsedSize += folder.size;
+      });
+      log('info', `Total used size calculated: ${totalUsedSize}`);
+    } else {
+      log('warn', 'No monitored folders found. Setting totalUsedSize to 0.');
+      totalUsedSize = 0;
+    }
+
+    log('info', `Inserting storage history with used_size: ${totalUsedSize}`);
     await db.run(
       `INSERT INTO storage_history (used_size, free_size) VALUES (?, 0)`,
       [totalUsedSize]
     );
+    log('info', 'Storage history updated successfully');
 
     // Find and record duplicate files
+    log('info', 'Finding duplicate files...');
     const duplicates = await db.all(`
       SELECT name, size, GROUP_CONCAT(path) as paths
       FROM file_stats
       GROUP BY name, size
       HAVING COUNT(*) > 1 AND size > 0
     `);
+    log('info', `Found ${duplicates.length} duplicate files`);
 
     for (const dup of duplicates) {
+      const pathsArray = dup.paths.split(','); // Split the comma-separated string into an array
       await db.run(
         `INSERT OR REPLACE INTO duplicate_files (name, size, paths) VALUES (?, ?, ?)`,
-        [dup.name, dup.size, dup.paths]
+        [dup.name, dup.size, JSON.stringify(pathsArray)]
       );
     }
 
+    log('info', 'Duplicate files updated successfully');
     log('info', 'Storage stats updated successfully', {
       totalUsedSize,
       duplicates: duplicates.length
@@ -270,7 +285,7 @@ async function updateStorageStats() {
 async function startMonitoring() {
   try {
     log('info', 'Starting monitoring service...');
-    isScanning = true;
+    isScanning = false;
     scanProgress = {
       totalItems: 0,
       scannedItems: 0,
@@ -279,7 +294,7 @@ async function startMonitoring() {
     };
 
     // Load monitored folders from the database
-    const monitoredFolders = await db.all('SELECT id, path FROM monitored_folders');
+    const monitoredFoldersFromDb = await db.all('SELECT id, path FROM monitored_folders');
 
     // Function to scan each monitored folder
     const scanMonitoredFolder = async (folder: { id: string; path: string }) => {
@@ -294,14 +309,7 @@ async function startMonitoring() {
       }
     };
     
-    // Initial scan of all monitored folders
-    await updateStorageStats();
-    await Promise.all(monitoredFolders.map(scanMonitoredFolder));
-
-    isScanning = false;
-
     // Set up file system watcher for each monitored folder
-    const monitoredFoldersFromDb = await db.all('SELECT id, path FROM monitored_folders');
     monitoredFoldersFromDb.forEach(folder => {
       const watcher = chokidar.watch(folder.path, {
         persistent: true,
