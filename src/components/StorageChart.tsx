@@ -9,6 +9,7 @@ import {
   Tooltip,
   Legend,
   TimeScale,
+  Filler // Import the Filler plugin
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { format } from 'date-fns';
@@ -21,7 +22,8 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  TimeScale
+  TimeScale,
+  Filler // Register the Filler plugin
 );
 
 interface StorageHistoryPoint {
@@ -63,17 +65,17 @@ export function StorageChart({ data, timeRange }: StorageChartProps) {
           },
         },
       },
-    },
-    scales: {
-      x: {
-        grid: {
-          display: false,
+      scales: {
+        x: {
+          grid: {
+            display: false,
+          },
         },
-      },
-      y: {
-        beginAtZero: true,
-        ticks: {
-          callback: (value: number) => `${value.toFixed(2)} GB`,
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: (value: number) => `${value.toFixed(2)} GB`,
+          },
         },
       },
     },

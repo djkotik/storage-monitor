@@ -23,7 +23,7 @@ async function log(level: 'info' | 'error' | 'warn', message: string, error?: un
   console.log(logWithError);
   
   // Add to in-memory log buffer
-  logBuffer.push(logWithError);
+  logBuffer.push(logMessage);
   if (logBuffer.length > maxLogLines) {
     logBuffer.shift(); // Remove the oldest log message
   }
@@ -120,8 +120,7 @@ async function initializeDatabase() {
         id TEXT PRIMARY KEY,
         path TEXT UNIQUE NOT NULL,
         size INTEGER NOT NULL DEFAULT 0,
-        items INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        last_scan DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        items INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS storage_history (
@@ -271,7 +270,7 @@ async function updateStorageStats() {
 async function startMonitoring() {
   try {
     log('info', 'Starting monitoring service...');
-    isScanning = false;
+    isScanning = true;
     scanProgress = {
       totalItems: 0,
       scannedItems: 0,
@@ -315,7 +314,7 @@ async function startMonitoring() {
         .on('add', p => log('info', `File added: ${p}`))
         .on('change', p => log('info', `File changed: ${p}`))
         .on('unlink', p => log('info', `File removed: ${p}`))
-        .on('error', error => log(`error`, `Watcher error: ${error}`))
+        .on('error', error => log(`error`, `Watcher error: ${error}`));
     });
 
     // Schedule regular scans
