@@ -23,7 +23,7 @@ async function log(level: 'info' | 'error' | 'warn', message: string, error?: un
   console.log(logWithError);
   
   // Add to in-memory log buffer
-  logBuffer.push(logWithError);
+  logBuffer.push(logMessage);
   if (logBuffer.length > maxLogLines) {
     logBuffer.shift(); // Remove the oldest log message
   }
@@ -279,7 +279,7 @@ async function startMonitoring() {
     };
 
     // Load monitored folders from the database
-    const monitoredFolders = await db.all('SELECT id, path FROM monitored_folders');
+    const monitoredFoldersFromDb = await db.all('SELECT id, path FROM monitored_folders');
 
     // Function to scan each monitored folder
     const scanMonitoredFolder = async (folder: { id: string; path: string }) => {
@@ -296,12 +296,11 @@ async function startMonitoring() {
     
     // Initial scan of all monitored folders
     await updateStorageStats();
-    await Promise.all(monitoredFolders.map(scanMonitoredFolder));
+    await Promise.all(monitoredFoldersFromDb.map(scanMonitoredFolder));
 
     isScanning = false;
 
     // Set up file system watcher for each monitored folder
-    const monitoredFoldersFromDb = await db.all('SELECT id, path FROM monitored_folders');
     monitoredFoldersFromDb.forEach(folder => {
       const watcher = chokidar.watch(folder.path, {
         persistent: true,
@@ -321,7 +320,7 @@ async function startMonitoring() {
         .on('add', p => log('info', `File added: ${p}`))
         .on('change', p => log('info', `File changed: ${p}`))
         .on('unlink', p => log('info', `File removed: ${p}`))
-        .on('error', error => log(`error`, `Watcher error: ${error}`));
+        .on('error', error => log(`error`, `Watcher error: ${error}`))
     });
 
     // Schedule regular scans
@@ -355,24 +354,54 @@ async function startMonitoring() {
   }
 }
 
+async function initialSetup() {
+  try {
+    log('info', 'Performing initial setup...');
+    
+    // Load monitored folders from the database
+    const monitoredFolders = await db.all('SELECT id, path FROM monitored_folders');
+
+    // Function to scan each monitored folder
+    const scanMonitoredFolder = async (folder: { id: string; path: string }) => {
+      try {
+        const { size, items } = await scanDirectory(folder.path);
+        await db.run(
+          `UPDATE monitored_folders SET size = ?, items = ?, last_scan = ? WHERE id = ?`,
+          [size, items, new Date().toISOString(), folder.id]
+        );
+      } catch (error) {
+        log('error', `Failed to scan monitored folder: ${folder.path}`, error);
+      }
+    };
+    
+    // Initial scan of all monitored folders
+    await updateStorageStats();
+    await Promise.all(monitoredFolders.map(scanMonitoredFolder));
+
+    log('info', 'Initial setup completed successfully');
+  } catch (error) {
+    log('error', 'Failed to perform initial setup', error);
+  }
+}
+
 // API Routes
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../../dist')));
 
 // API endpoint to get logs
-app.get('/api/logs', (_ , res) => {
+app.get('/api/logs', (_, res) => {
   res.json(logBuffer);
 });
 
 // API Routes with error handling
-app.get('/api/scan/status', (_ , res) => {
+app.get('/api/scan/status', (_, res) => {
   res.json({
     isScanning,
     progress: scanProgress
   });
 });
 
-app.get('/api/storage/stats', async (_ , res) => {
+app.get('/api/storage/stats', async (_, res) => {
   try {
     const stats = await db.get('SELECT * FROM storage_history ORDER BY timestamp DESC LIMIT 1');
     res.json(stats);
@@ -382,7 +411,7 @@ app.get('/api/storage/stats', async (_ , res) => {
   }
 });
 
-app.get('/api/storage/history', async (_ , res) => {
+app.get('/api/storage/history', async (_, res) => {
   try {
     const history = await db.all('SELECT * FROM storage_history ORDER BY timestamp DESC LIMIT 365');
     res.json(history.reverse());
@@ -392,7 +421,7 @@ app.get('/api/storage/history', async (_ , res) => {
   }
 });
 
-app.get('/api/files/types', async (_ , res) => {
+app.get('/api/files/types', async (_, res) => {
   try {
     const types = await db.all(`
       SELECT type, SUM(size) as size, COUNT(*) as count
@@ -407,7 +436,7 @@ app.get('/api/files/types', async (_ , res) => {
   }
 });
 
-app.get('/api/files/duplicates', async (_ , res) => {
+app.get('/api/files/duplicates', async (_, res) => {
   try {
     const duplicates = await db.all(`SELECT * FROM duplicate_files ORDER BY size DESC`);
     res.json(duplicates);
@@ -417,7 +446,7 @@ app.get('/api/files/duplicates', async (_ , res) => {
   }
 });
 
-app.get('/api/folders', async (_ , res) => {
+app.get('/api/folders', async (_, res) => {
   try {
     const folders = await db.all('SELECT * FROM monitored_folders');
     res.json(folders);
@@ -427,7 +456,7 @@ app.get('/api/folders', async (_ , res) => {
   }
 });
 
-app.post('/api/scan', async (_ , res) => {
+app.post('/api/scan', async (_, res) => {
   try {
     if (isScanning) {
       return res.status(409).json({ error: 'Scan already in progress' });
@@ -522,7 +551,7 @@ app.post('/api/folders', async (req, res) => {
       .on('add', p => log('info', `File added: ${p}`))
       .on('change', p => log('info', `File changed: ${p}`))
       .on('unlink', p => log('info', `File removed: ${p}`))
-      .on('error', error => log(`error`, `Watcher error: ${error}`));
+      .on('error', error => log(`error`, `Watcher error: ${error}`))
     
     res.json({ success: true, id });
   } catch (error) {
@@ -548,12 +577,21 @@ app.delete('/api/folders/:id', async (req, res) => {
   }
 });
 
+// Serve the frontend
+app.get('*', (_, res) => {
+  res.sendFile(path.join(__dirname, '../../dist', 'index.html'));
+});
+
 // Start the server
 async function startServer() {
   try {
     log('info', 'Starting server...');
     await ensureDirectories();
     await initializeDatabase();
+    
+    // Start initial setup asynchronously
+    setImmediate(initialSetup);
+
     await startMonitoring();
     
     app.listen(port, () => {
