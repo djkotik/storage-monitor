@@ -10,12 +10,17 @@ interface FileNode {
 }
 
 interface FolderTreeProps {
-  data: FileNode;
+  data: FileNode | undefined; // Allow data to be undefined
   level?: number;
 }
 
 export function FolderTree({ data, level = 0 }: FolderTreeProps) {
   const [isExpanded, setIsExpanded] = React.useState(level === 0);
+
+  // Handle the case where data is undefined
+  if (!data) {
+    return <div className="text-gray-500 dark:text-gray-400" style={{ paddingLeft: `${level * 1.5}rem` }}>No folders monitored yet.</div>;
+  }
 
   const sortedChildren = React.useMemo(() => {
     if (!data.children) return [];

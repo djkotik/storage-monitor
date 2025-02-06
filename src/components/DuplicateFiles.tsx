@@ -28,27 +28,27 @@ export function DuplicateFiles({ files }: DuplicateFilesProps) {
                   {file.name}
                 </span>
               </div>
-              <span className="text-gray-500 dark:text-gray-400">
-                {formatBytes(file.size)}
-              </span>
-            </div>
-            <div className="pl-6 space-y-1">
-              {/* Check if file.paths is a valid JSON string before parsing */}
-              {(() => {
-                try {
-                  const paths = JSON.parse(file.paths);
-                  if (Array.isArray(paths)) {
-                    return paths.map((path: string, pathIndex: number) => (
-                      <div
-                        key={pathIndex}
-                        className="text-sm text-gray-600 dark:text-gray-400"
-                      >
-                        {path}
-                      </div>
-                    ));
-                  } else {
-                    console.warn('Invalid paths data:', file.paths);
-                    return <div className="text-sm text-gray-600 dark:text-gray-400">Invalid paths data</div>;
+            <span className="text-gray-500 dark:text-gray-400">
+              {formatBytes(file.size)}
+            </span>
+          </div>
+          <div className="pl-6 space-y-1">
+            {/* Parse the JSON string to get the array of paths */}
+            {(() => {
+              try {
+                const paths = JSON.parse(file.paths);
+                if (Array.isArray(paths)) {
+                  return paths.map((path: string, pathIndex: number) => (
+                    <div
+                      key={pathIndex}
+                      className="text-sm text-gray-600 dark:text-gray-400"
+                    >
+                      {path}
+                    </div>
+                  ));
+                } else {
+                  console.warn('Invalid paths data:', file.paths);
+                  return <div className="text-sm text-gray-600 dark:text-gray-400">Invalid paths data</div>;
                 }
               } catch (error) {
                 console.error('Error parsing paths:', error);

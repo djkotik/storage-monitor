@@ -20,12 +20,12 @@ async function log(level: 'info' | 'error' | 'warn', message: string, error?: un
   const logMessage = `[${timestamp}] ${level.toUpperCase()}: ${message}`;
   const logWithError = error ? `${logMessage}\nError details: ${JSON.stringify(error, null, 2)}` : logMessage;
   
-  console.log(logWithError);
+  console.log(logMessage);
   
   // Add to in-memory log buffer
   logBuffer.push(logWithError);
   if (logBuffer.length > maxLogLines) {
-    logBuffer.shift(); // Remove the oldest logMessage
+    logBuffer.shift(); // Remove the oldest log message
   }
 
   try {
@@ -478,10 +478,14 @@ app.get('/api/files/types', async (_, res) => {
 
 app.get('/api/files/duplicates', async (_, res) => {
   try {
-    const duplicates = await db.all(`SELECT * FROM duplicate_files ORDER BY size DESC`);
+    const duplicates = await db.all(`
+      SELECT name, size, paths
+      FROM duplicate_files
+    `);
     res.json(duplicates.map(dup => ({
-      ...dup,
-      paths: JSON.parse(dup.paths)
+      name: dup.name,
+      size: dup.size,
+      paths: dup.paths ? JSON.parse(dup.paths) : []
     })));
   } catch (error) {
     log('error', 'Failed to fetch duplicates', error);
@@ -594,7 +598,7 @@ app.post('/api/folders', async (req, res) => {
       .on('add', p => log('info', `File added: ${p}`))
       .on('change', p => log('info', `File changed: ${p}`))
       .on('unlink', p => log('info', `File removed: ${p}`))
-      .on('error', error => log(`error`, `Watcher error: ${error}`))
+        .on('error', error => log(`error`, `Watcher error: ${error}`))
     
     res.json({ success: true, id });
   } catch (error) {
