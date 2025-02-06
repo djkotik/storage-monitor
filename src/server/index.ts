@@ -25,7 +25,7 @@ async function log(level: 'info' | 'error' | 'warn', message: string, error?: un
   // Add to in-memory log buffer
   logBuffer.push(logWithError);
   if (logBuffer.length > maxLogLines) {
-    logBuffer.shift(); // Remove the oldest log message
+    logBuffer.shift(); // Remove the oldest logMessage
   }
 
   try {
@@ -120,8 +120,7 @@ async function initializeDatabase() {
         id TEXT PRIMARY KEY,
         path TEXT UNIQUE NOT NULL,
         size INTEGER NOT NULL DEFAULT 0,
-        items INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        last_scan DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        items INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS storage_history (
@@ -252,18 +251,16 @@ async function updateStorageStats() {
       HAVING COUNT(*) > 1 AND size > 0
     `);
 
-    for (const dup of duplicates) {
-      const pathsArray = dup.paths ? dup.paths.split(',') : []; // Handle null or undefined paths
-      await db.run(
-        `INSERT OR REPLACE INTO duplicate_files (name, size, paths) VALUES (?, ?, ?)`,
-        [dup.name, dup.size, JSON.stringify(pathsArray)]
-      );
-    }
+    const duplicateFiles = duplicates.map(dup => ({
+      name: dup.name,
+      size: dup.size,
+      paths: dup.paths ? dup.paths.split(',') : [] // Ensure paths is always an array
+    }));
 
     log('info', 'Duplicate files updated successfully');
     log('info', 'Storage stats updated successfully', {
       totalUsedSize,
-      duplicates: duplicates.length
+      duplicates: duplicateFiles.length
     });
   } catch (error) {
     log('error', 'Failed to update storage stats', error);
@@ -481,7 +478,7 @@ app.get('/api/files/types', async (_, res) => {
 
 app.get('/api/files/duplicates', async (_, res) => {
   try {
-    const duplicates = await db.all(`SELECT name, size, paths FROM duplicate_files`);
+    const duplicates = await db.all(`SELECT * FROM duplicate_files ORDER BY size DESC`);
     res.json(duplicates.map(dup => ({
       ...dup,
       paths: JSON.parse(dup.paths)
