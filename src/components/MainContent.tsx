@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Moon, Sun, Maximize2, HardDrive, FileType2, Files, Copy, PieChart, FolderTree as FolderTreeIcon, RefreshCw, Settings as SettingsIcon, AlertCircle } from 'lucide-react';
 import { useThemeStore } from '../store/theme';
 import { StorageChart } from './StorageChart';
@@ -13,7 +13,7 @@ import { SettingsModal } from './SettingsModal';
 import { ScanStatusModal } from './ScanStatusModal';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-function MainContent() {
+export function MainContent() {
   const { isDark } = useThemeStore();
   const [timeRange, setTimeRange] = React.useState<'day' | 'week' | 'month' | 'year'>('month');
   const [isAddFolderOpen, setIsAddFolderOpen] = React.useState(false);
@@ -75,21 +75,38 @@ function MainContent() {
     },
   });
 
-  const { data: duplicateFiles } = useQuery({
+  const { data: duplicateFiles, error: duplicateFilesError } = useQuery({
     queryKey: ['duplicateFiles'],
     queryFn: async () => {
-      const response = await fetch('/api/files/duplicates');
-      if (!response.ok) throw new Error('Failed to fetch duplicates');
-      return response.json();
+      try {
+        const response = await fetch('/api/files/duplicates');
+        if (!response.ok) {
+          log('error', 'Failed to fetch duplicate files', await response.text());
+          throw new Error('Failed to fetch duplicate files');
+        }
+        const data = await response.json();
+        log('info', `Fetched duplicate files: ${JSON.stringify(data)}`);
+        return data;
+      } catch (error) {
+        log('error', 'Error in duplicateFiles query', error);
+        throw error;
+      }
     },
   });
 
-  const { data: monitoredFolders } = useQuery({
+  const { data: monitoredFolders, error: monitoredFoldersError } = useQuery({
     queryKey: ['monitoredFolders'],
     queryFn: async () => {
-      const response = await fetch('/api/folders');
-      if (!response.ok) throw new Error('Failed to fetch folders');
-      return response.json();
+      try {
+        const response = await fetch('/api/folders');
+        if (!response.ok) throw new Error('Failed to fetch folders');
+        const data = await response.json();
+        log('info', `Fetched monitored folders: ${JSON.stringify(data)}`);
+        return data;
+      } catch (error) {
+        log('error', 'Error in monitoredFolders query', error);
+        throw error;
+      }
     },
   });
 
@@ -278,7 +295,7 @@ function MainContent() {
                   >
                     Add Folder
                   </button>
-                  <FolderTree data={monitoredFolders || { name: 'Loading...', size: 0, type: 'folder' as const }} />
+                  <FolderTree data={monitoredFolders || undefined} />
                 </div>
               )}
             >
@@ -286,13 +303,16 @@ function MainContent() {
             </button>
           </div>
           <div className="space-y-3">
+            {monitoredFoldersError && (
+              <div className="text-red-500">Error loading monitored folders.</div>
+            )}
             <button 
               onClick={() => setIsAddFolderOpen(true)}
               className="w-full py-2 px-4 bg-primary-light dark:bg-primary-dark text-white rounded-lg hover:opacity-90 transition-opacity"
             >
               Add Folder
             </button>
-            <FolderTree data={monitoredFolders || { name: 'Loading...', size: 0, type: 'folder' as const }} />
+            <FolderTree data={monitoredFolders || undefined} />
           </div>
         </div>
 
@@ -326,6 +346,9 @@ function MainContent() {
               <Copy className="w-5 h-5 text-primary-light dark:text-primary-dark" />
               <h3 className="font-semibold text-gray-900 dark:text-white">Duplicate Files</h3>
             </div>
+            {duplicateFilesError && (
+              <div className="text-red-500">Error loading duplicate files.</div>
+            )}
             <button 
               className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
               onClick={() => openFullscreen('Duplicate Files', 
@@ -370,5 +393,3 @@ function MainContent() {
     </main>
   );
 }
-
-export default MainContent;

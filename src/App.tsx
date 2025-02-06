@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Moon, Sun, HardDrive, AlertCircle } from 'lucide-react';
+import { Moon, Sun, HardDrive, FileType2, Files, Copy, PieChart, FolderTree as FolderTreeIcon, RefreshCw, Settings as SettingsIcon, AlertCircle } from 'lucide-react';
 import { useThemeStore } from './store/theme';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import MainContent from './components/MainContent';
+import { MainContent } from './components/MainContent';
 import LogViewer from './components/LogViewer';
 
 const queryClient = new QueryClient();

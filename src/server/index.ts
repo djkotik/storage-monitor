@@ -23,7 +23,7 @@ async function log(level: 'info' | 'error' | 'warn', message: string, error?: un
   console.log(logMessage);
   
   // Add to in-memory log buffer
-  logBuffer.push(logWithError);
+  logBuffer.push(logMessage);
   if (logBuffer.length > maxLogLines) {
     logBuffer.shift(); // Remove the oldest log message
   }
@@ -251,16 +251,18 @@ async function updateStorageStats() {
       HAVING COUNT(*) > 1 AND size > 0
     `);
 
-    const duplicateFiles = duplicates.map(dup => ({
-      name: dup.name,
-      size: dup.size,
-      paths: dup.paths ? dup.paths.split(',') : [] // Ensure paths is always an array
-    }));
+    for (const dup of duplicates) {
+      const pathsArray = dup.paths ? dup.paths.split(',') : [];
+      await db.run(
+        `INSERT OR REPLACE INTO duplicate_files (name, size, paths) VALUES (?, ?, ?)`,
+        [dup.name, dup.size, JSON.stringify(pathsArray)]
+      );
+    }
 
     log('info', 'Duplicate files updated successfully');
     log('info', 'Storage stats updated successfully', {
       totalUsedSize,
-      duplicates: duplicateFiles.length
+      duplicates: duplicates.length
     });
   } catch (error) {
     log('error', 'Failed to update storage stats', error);
@@ -385,7 +387,7 @@ async function cleanupDatabase() {
     log('info', 'Cleaning up database...');
 
     // Get all file stats
-    const fileStats = await db.all('SELECT path, parent_folder FROM file_stats');
+    const fileStats = await db.all(`SELECT path, parent_folder FROM file_stats`);
 
     // Iterate through each file stat and check if the file exists
     for (const fileStat of fileStats) {
@@ -598,7 +600,7 @@ app.post('/api/folders', async (req, res) => {
       .on('add', p => log('info', `File added: ${p}`))
       .on('change', p => log('info', `File changed: ${p}`))
       .on('unlink', p => log('info', `File removed: ${p}`))
-        .on('error', error => log(`error`, `Watcher error: ${error}`))
+      .on('error', error => log(`error`, `Watcher error: ${error}`))
     
     res.json({ success: true, id });
   } catch (error) {
