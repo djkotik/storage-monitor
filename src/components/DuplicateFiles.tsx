@@ -32,7 +32,7 @@ export function DuplicateFiles({ files }: DuplicateFilesProps) {
             </span>
           </div>
           <div className="pl-6 space-y-1">
-            {/* Check if file.paths is a valid JSON string before parsing */}
+            {/* Parse the JSON string to get the array of paths */}
             {(() => {
               try {
                 const paths = JSON.parse(file.paths);

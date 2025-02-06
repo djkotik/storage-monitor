@@ -23,7 +23,7 @@ async function log(level: 'info' | 'error' | 'warn', message: string, error?: un
   console.log(logWithError);
   
   // Add to in-memory log buffer
-  logBuffer.push(logMessage);
+  logBuffer.push(logWithError);
   if (logBuffer.length > maxLogLines) {
     logBuffer.shift(); // Remove the oldest log message
   }
@@ -120,7 +120,8 @@ async function initializeDatabase() {
         id TEXT PRIMARY KEY,
         path TEXT UNIQUE NOT NULL,
         size INTEGER NOT NULL DEFAULT 0,
-        items INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP
+        items INTEGER NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_scan DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS storage_history (
@@ -245,11 +246,21 @@ async function updateStorageStats() {
     // Find and record duplicate files
     log('info', 'Finding duplicate files...');
     const duplicates = await db.all(`
-      SELECT name, size, paths
-      FROM duplicate_files
+      SELECT name, size, GROUP_CONCAT(path) as paths
+      FROM file_stats
+      GROUP BY name, size
+      HAVING COUNT(*) > 1 AND size > 0
     `);
-    log('info', `Found ${duplicates.length} duplicate files`);
 
+    for (const dup of duplicates) {
+      const pathsArray = dup.paths ? dup.paths.split(',') : []; // Handle null or undefined paths
+      await db.run(
+        `INSERT OR REPLACE INTO duplicate_files (name, size, paths) VALUES (?, ?, ?)`,
+        [dup.name, dup.size, JSON.stringify(pathsArray)]
+      );
+    }
+
+    log('info', 'Duplicate files updated successfully');
     log('info', 'Storage stats updated successfully', {
       totalUsedSize,
       duplicates: duplicates.length
@@ -371,6 +382,51 @@ async function initialSetup() {
   }
 }
 
+// Function to cleanup the database
+async function cleanupDatabase() {
+  try {
+    log('info', 'Cleaning up database...');
+
+    // Get all file stats
+    const fileStats = await db.all('SELECT path, parent_folder FROM file_stats');
+
+    // Iterate through each file stat and check if the file exists
+    for (const fileStat of fileStats) {
+      try {
+        syncFs.accessSync(fileStat.path, syncFs.constants.R_OK);
+      } catch (error) {
+        // If the file doesn't exist, delete the record from file_stats
+        log('warn', `File not found, deleting record: ${fileStat.path}`);
+        await db.run(`DELETE FROM file_stats WHERE path = ?`, [fileStat.path]);
+      }
+    }
+
+    // Get all monitored folders
+    const monitoredFolders = await db.all('SELECT id, path FROM monitored_folders');
+
+    // Iterate through each monitored folder and check if the folder exists
+    for (const folder of monitoredFolders) {
+      try {
+        syncFs.accessSync(folder.path, syncFs.constants.R_OK);
+      } catch (error) {
+        // If the folder doesn't exist, delete the record from monitored_folders and file_stats
+        log('warn', `Folder not found, deleting record and associated file stats: ${folder.path}`);
+        await db.run(`DELETE FROM file_stats WHERE parent_folder = ?`, [folder.path]);
+        await db.run(`DELETE FROM monitored_folders WHERE id = ?`, [folder.id]);
+      }
+    }
+
+    log('info', 'Database cleanup completed successfully');
+  } catch (error) {
+    log('error', 'Failed to cleanup database', error);
+  }
+}
+
+// Schedule the database cleanup to run daily
+setInterval(async () => {
+  await cleanupDatabase();
+}, 24 * 60 * 60 * 1000);
+
 // API Routes
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../../dist')));
@@ -425,8 +481,11 @@ app.get('/api/files/types', async (_, res) => {
 
 app.get('/api/files/duplicates', async (_, res) => {
   try {
-    const duplicates = await db.all(`SELECT * FROM duplicate_files ORDER BY size DESC`);
-    res.json(duplicates);
+    const duplicates = await db.all(`SELECT name, size, paths FROM duplicate_files`);
+    res.json(duplicates.map(dup => ({
+      ...dup,
+      paths: JSON.parse(dup.paths)
+    })));
   } catch (error) {
     log('error', 'Failed to fetch duplicates', error);
     res.status(500).json({ error: 'Failed to fetch duplicates' });
@@ -590,4 +649,4 @@ async function startServer() {
   }
 }
 
-startServer();
+setImmediate(startServer);
