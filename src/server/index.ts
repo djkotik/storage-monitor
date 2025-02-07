@@ -23,7 +23,7 @@ async function log(level: 'info' | 'error' | 'warn', message: string, error?: un
   console.log(logMessage);
   
   // Add to in-memory log buffer
-  logBuffer.push(logMessage);
+  logBuffer.push(logWithError);
   if (logBuffer.length > maxLogLines) {
     logBuffer.shift(); // Remove the oldest log message
   }
@@ -251,18 +251,16 @@ async function updateStorageStats() {
       HAVING COUNT(*) > 1 AND size > 0
     `);
 
-    for (const dup of duplicates) {
-      const pathsArray = dup.paths ? dup.paths.split(',') : [];
-      await db.run(
-        `INSERT OR REPLACE INTO duplicate_files (name, size, paths) VALUES (?, ?, ?)`,
-        [dup.name, dup.size, JSON.stringify(pathsArray)]
-      );
-    }
+    const duplicateFiles = duplicates.map(dup => ({
+      name: dup.name,
+      size: dup.size,
+      paths: dup.paths ? dup.paths.split(',') : [] // Ensure paths is always an array
+    }));
 
     log('info', 'Duplicate files updated successfully');
     log('info', 'Storage stats updated successfully', {
       totalUsedSize,
-      duplicates: duplicates.length
+      duplicates: duplicateFiles.length
     });
   } catch (error) {
     log('error', 'Failed to update storage stats', error);
@@ -387,7 +385,7 @@ async function cleanupDatabase() {
     log('info', 'Cleaning up database...');
 
     // Get all file stats
-    const fileStats = await db.all(`SELECT path, parent_folder FROM file_stats`);
+    const fileStats = await db.all('SELECT path, parent_folder FROM file_stats');
 
     // Iterate through each file stat and check if the file exists
     for (const fileStat of fileStats) {
@@ -420,6 +418,30 @@ async function cleanupDatabase() {
     log('error', 'Failed to cleanup database', error);
   }
 }
+
+// API endpoint to reset the database
+app.post('/api/reset-database', async (_, res) => {
+  try {
+    log('info', 'Resetting database...');
+
+    // Drop all tables
+    await db.exec(`
+      DROP TABLE IF EXISTS monitored_folders;
+      DROP TABLE IF EXISTS storage_history;
+      DROP TABLE IF EXISTS file_stats;
+      DROP TABLE IF EXISTS duplicate_files;
+    `);
+
+    // Re-initialize the database
+    await initializeDatabase();
+
+    log('info', 'Database reset successfully');
+    res.json({ success: true });
+  } catch (error) {
+    log('error', 'Failed to reset database', error);
+    res.status(500).json({ error: 'Failed to reset database' });
+  }
+});
 
 // Schedule the database cleanup to run daily
 setInterval(async () => {
@@ -480,10 +502,7 @@ app.get('/api/files/types', async (_, res) => {
 
 app.get('/api/files/duplicates', async (_, res) => {
   try {
-    const duplicates = await db.all(`
-      SELECT name, size, paths
-      FROM duplicate_files
-    `);
+    const duplicates = await db.all(`SELECT * FROM duplicate_files ORDER BY size DESC`);
     res.json(duplicates.map(dup => ({
       name: dup.name,
       size: dup.size,

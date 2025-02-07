@@ -8,6 +8,7 @@ interface SettingsModalProps {
   onScanIntervalChange: (interval: number) => void;
   folders: Array<{ id: string; path: string }>;
   onDeleteFolder: (id: string) => void;
+  onResetDatabase: () => void;
 }
 
 export function SettingsModal({
@@ -17,6 +18,7 @@ export function SettingsModal({
   onScanIntervalChange,
   folders,
   onDeleteFolder,
+  onResetDatabase,
 }: SettingsModalProps) {
   const [showConfirmDelete, setShowConfirmDelete] = React.useState<string | null>(null);
 
@@ -98,6 +100,18 @@ export function SettingsModal({
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Reset Database */}
+          <div>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-3">Reset Database</h3>
+            <p className="text-gray-700 dark:text-gray-300">This will delete all data and reset the database to its initial state.</p>
+            <button
+              onClick={onResetDatabase}
+              className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+            >
+              Reset Database
+            </button>
           </div>
         </div>
       </div>

@@ -89,7 +89,7 @@ export function MainContent() {
         return data;
       } catch (error) {
         log('error', 'Error in duplicateFiles query', error);
-        throw error;
+        return []; // Return an empty array in case of error
       }
     },
   });
@@ -105,7 +105,7 @@ export function MainContent() {
         return data;
       } catch (error) {
         log('error', 'Error in monitoredFolders query', error);
-        throw error;
+        return []; // Return an empty array in case of error
       }
     },
   });
