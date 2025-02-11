@@ -1,5 +1,6 @@
 import React from 'react';
-import { X, AlertCircle } from 'lucide-react';
+import { X, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 
 interface ScanStatus {
   isScanning: boolean;
@@ -8,6 +9,11 @@ interface ScanStatus {
     scannedItems: number;
     currentPath: string;
     errors: string[];
+    logs: Array<{
+      timestamp: string;
+      level: string;
+      message: string;
+    }>;
   };
 }
 
@@ -22,7 +28,7 @@ export function ScanStatusModal({ isOpen, onClose, status }: ScanStatusModalProp
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-card-light dark:bg-card-dark rounded-lg p-6 w-full max-w-2xl">
+      <div className="bg-card-light dark:bg-card-dark rounded-lg p-6 w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-5 h-5 text-primary-light dark:text-primary-dark" />
@@ -36,7 +42,7 @@ export function ScanStatusModal({ isOpen, onClose, status }: ScanStatusModalProp
           </button>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-6 flex-1 overflow-auto">
           <div>
             <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-3">Current Status</h3>
             <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
@@ -56,13 +62,49 @@ export function ScanStatusModal({ isOpen, onClose, status }: ScanStatusModalProp
             </div>
           </div>
 
+          <div>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-3">Scan Logs</h3>
+            <div className="space-y-2 max-h-[300px] overflow-auto">
+              {status?.progress.logs.map((log, index) => (
+                <div
+                  key={index}
+                  className={`p-3 rounded-lg flex items-start gap-2 ${
+                    log.level === 'error'
+                      ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
+                      : log.level === 'warn'
+                      ? 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400'
+                      : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  {log.level === 'error' ? (
+                    <XCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  ) : log.level === 'warn' ? (
+                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  ) : (
+                    <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1">
+                    <div className="text-sm opacity-75">
+                      {formatDistanceToNow(new Date(log.timestamp))} ago
+                    </div>
+                    <div>{log.message}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {status?.progress.errors.length > 0 && (
             <div>
               <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-3">Errors</h3>
               <div className="space-y-2">
                 {status.progress.errors.map((error, index) => (
-                  <div key={index} className="p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg">
-                    {error}
+                  <div
+                    key={index}
+                    className="p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg flex items-start gap-2"
+                  >
+                    <XCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
                   </div>
                 ))}
               </div>
