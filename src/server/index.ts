@@ -10,70 +10,41 @@ import { statfs } from 'fs/promises';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Utility function to format bytes
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const k = 1024;
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${units[i]}`;
-}
-
 // Global variables
 let db: any;
 const scanProgress = {
   totalItems: 0,
   scannedItems: 0,
   currentPath: '',
+  lastScanTime: null as string | null,
   errors: [] as string[],
   logs: [] as Array<{ timestamp: string; level: string; message: string }>
 };
 
-// Enhanced logging function with file output
-async function log(level: 'info' | 'error' | 'warn', message: string, error?: unknown) {
-  const timestamp = new Date().toISOString();
-  const logMessage = `[${timestamp}] ${level.toUpperCase()}: ${message}`;
-  const logWithError = error ? `${logMessage}\nError details: ${JSON.stringify(error, null, 2)}` : logMessage;
-  
-  console.log(logWithError);
-  
-  try {
-    await fs.mkdir('/appdata/logs', { recursive: true });
-    await fs.appendFile('/appdata/logs/server.log', logWithError + '\n');
-  } catch (err) {
-    console.error('Failed to write to log file:', err instanceof Error ? err.message : String(err));
-  }
-}
-
 // Express app setup
 const app = express();
+app.use(express.json());
 const port = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || '/appdata/database.sqlite';
 
 // Initialize database
 async function initializeDatabase() {
   try {
-    await log('info', 'Initializing database...');
+    console.log('Initializing database...');
     
     const dbDir = dirname(DB_PATH);
-    await log('info', `Ensuring database directory exists: ${dbDir}`);
     await fs.mkdir(dbDir, { recursive: true });
     
     try {
       await fs.access(dbDir, fs.constants.W_OK);
-      await log('info', `Write permission confirmed for directory: ${dbDir}`);
     } catch (error) {
-      throw new Error(`No write permission for database directory ${dbDir}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`No write permission for database directory ${dbDir}`);
     }
-    
-    await log('info', `Opening database at: ${DB_PATH}`);
     
     db = await open({
       filename: DB_PATH,
       driver: sqlite3.Database
     });
-
-    await log('info', 'Database connection established');
 
     // Create tables if they don't exist
     await db.exec(`
@@ -89,7 +60,8 @@ async function initializeDatabase() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         used_size INTEGER NOT NULL,
-        free_size INTEGER NOT NULL
+        free_size INTEGER NOT NULL,
+        folder_id TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS file_stats (
@@ -108,13 +80,9 @@ async function initializeDatabase() {
         size INTEGER NOT NULL,
         paths TEXT NOT NULL
       );
-
-      CREATE INDEX IF NOT EXISTS idx_file_stats_type ON file_stats(type);
-      CREATE INDEX IF NOT EXISTS idx_file_stats_size ON file_stats(size);
-      CREATE INDEX IF NOT EXISTS idx_storage_history_timestamp ON storage_history(timestamp);
     `);
   } catch (error) {
-    await log('error', 'Database initialization failed', error);
+    console.error('Database initialization failed:', error);
     throw error;
   }
 }
@@ -129,18 +97,15 @@ async function validatePath(path: string): Promise<{ valid: boolean; error?: str
     await fs.readdir(path);
     return { valid: true };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    await log('error', `Path validation failed: ${path}`, error);
     return { 
       valid: false, 
-      error: `Path is not accessible: ${errorMessage}`
+      error: `Path is not accessible: ${error instanceof Error ? error.message : String(error)}`
     };
   }
 }
 
 async function scanDirectory(dirPath: string, folderId: string): Promise<{ size: number; items: number }> {
   try {
-    await log('info', `Scanning directory: ${dirPath}`);
     scanProgress.currentPath = dirPath;
     scanProgress.logs.push({
       timestamp: new Date().toISOString(),
@@ -153,7 +118,6 @@ async function scanDirectory(dirPath: string, folderId: string): Promise<{ size:
 
     const validation = await validatePath(dirPath);
     if (!validation.valid) {
-      await log('error', `Skipping inaccessible path: ${dirPath}`, validation.error);
       scanProgress.errors.push(`Skipping inaccessible path: ${dirPath} - ${validation.error}`);
       return { size: 0, items: 0 };
     }
@@ -189,10 +153,9 @@ async function scanDirectory(dirPath: string, folderId: string): Promise<{ size:
             level: 'error',
             message: errorMsg
           });
-          await log('warn', `Permission denied for path: ${fullPath}`, error);
           continue;
         }
-        await log('error', `Error scanning ${fullPath}`, error);
+        console.error(`Error scanning ${fullPath}:`, error);
       }
     }
 
@@ -205,16 +168,22 @@ async function scanDirectory(dirPath: string, folderId: string): Promise<{ size:
       [totalSize, freeFolderSize, folderId]
     );
 
-    await log('info', `Scan completed for ${dirPath}: ${totalItems} items, ${totalSize} bytes`);
+    // Update last scan time
+    scanProgress.lastScanTime = new Date().toISOString();
+    await db.run(
+      'UPDATE monitored_folders SET last_scan = ?, size = ?, items = ? WHERE id = ?',
+      [scanProgress.lastScanTime, totalSize, totalItems, folderId]
+    );
+
     scanProgress.logs.push({
       timestamp: new Date().toISOString(),
       level: 'info',
-      message: `Scan completed for ${dirPath}: ${totalItems} items, ${formatBytes(totalSize)}`
+      message: `Scan completed for ${dirPath}: ${totalItems} items, ${totalSize} bytes`
     });
     
     return { size: totalSize, items: totalItems };
   } catch (error) {
-    await log('error', `Failed to scan directory: ${dirPath}`, error);
+    console.error(`Failed to scan directory: ${dirPath}`, error);
     throw error;
   }
 }
@@ -224,11 +193,25 @@ app.get('/api/scan/status', (_req, res) => {
   res.json(scanProgress);
 });
 
+app.get('/api/folders', async (_req, res) => {
+  try {
+    const folders = await db.all('SELECT * FROM monitored_folders');
+    res.json(folders);
+  } catch (error) {
+    console.error('Failed to fetch folders:', error);
+    res.status(500).json({ error: 'Failed to fetch folders' });
+  }
+});
+
 app.post('/api/folders', async (req, res) => {
   try {
-    const { path } = req.body;
+    const { path: folderPath } = req.body;
     
-    const validation = await validatePath(path);
+    if (!folderPath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    const validation = await validatePath(folderPath);
     if (!validation.valid) {
       return res.status(400).json({ error: validation.error });
     }
@@ -240,10 +223,10 @@ app.post('/api/folders', async (req, res) => {
     try {
       await db.run(
         'INSERT INTO monitored_folders (id, path, size, items, last_scan) VALUES (?, ?, 0, 0, ?)',
-        [id, path, new Date().toISOString()]
+        [id, folderPath, new Date().toISOString()]
       );
       
-      const { size, items } = await scanDirectory(path, id);
+      const { size, items } = await scanDirectory(folderPath, id);
       await db.run(
         'UPDATE monitored_folders SET size = ?, items = ? WHERE id = ?',
         [size, items, id]
@@ -251,38 +234,29 @@ app.post('/api/folders', async (req, res) => {
       
       await db.run('COMMIT');
       res.json({ success: true, id });
-      
-      await log('info', `Added new folder to monitor: ${path}`);
     } catch (error) {
       await db.run('ROLLBACK');
       throw error;
     }
   } catch (error) {
-    await log('error', 'Failed to add folder', error);
-    res.status(500).json({ error: 'Failed to add folder' });
+    console.error('Failed to add folder:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to add folder' });
   }
 });
 
 // Start the server
 async function startServer() {
   try {
-    await log('info', 'Starting server...');
     await initializeDatabase();
-    
-    app.use(express.json());
     app.use(express.static(path.join(__dirname, '../../dist')));
     
     app.listen(port, () => {
-      log('info', `Server running on port ${port}`);
+      console.log(`Server running on port ${port}`);
     });
   } catch (error) {
-    await log('error', 'Fatal error starting server', error);
+    console.error('Fatal error starting server:', error);
     process.exit(1);
   }
 }
 
-// Start the server
-startServer().catch(error => {
-  console.error('Failed to start server:', error);
-  process.exit(1);
-});
+startServer();
