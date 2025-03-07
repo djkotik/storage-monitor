@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Trash2, Settings as SettingsIcon } from 'lucide-react';
+import { X, Trash2, Settings as SettingsIcon, AlertCircle } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -19,6 +19,8 @@ export function SettingsModal({
   onDeleteFolder,
 }: SettingsModalProps) {
   const [showConfirmDelete, setShowConfirmDelete] = React.useState<string | null>(null);
+  const [showConfirmReset, setShowConfirmReset] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -27,8 +29,25 @@ export function SettingsModal({
   };
 
   const confirmDelete = async (id: string) => {
-    await onDeleteFolder(id);
-    setShowConfirmDelete(null);
+    try {
+      await onDeleteFolder(id);
+      setShowConfirmDelete(null);
+      setError(null);
+    } catch (err) {
+      setError('Failed to delete folder. Please try again.');
+    }
+  };
+
+  const handleReset = async () => {
+    try {
+      const response = await fetch('/api/reset', { method: 'POST' });
+      if (!response.ok) throw new Error('Failed to reset database');
+      setShowConfirmReset(false);
+      setError(null);
+      window.location.reload(); // Refresh the page to show empty state
+    } catch (err) {
+      setError('Failed to reset database. Please try again.');
+    }
   };
 
   return (
@@ -46,6 +65,13 @@ export function SettingsModal({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg flex items-center gap-2">
+            <AlertCircle className="w-5 h-5" />
+            <span>{error}</span>
+          </div>
+        )}
 
         <div className="space-y-6">
           {/* Scan Interval Setting */}
@@ -98,6 +124,39 @@ export function SettingsModal({
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Reset Database */}
+          <div>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-3">Reset Database</h3>
+            {showConfirmReset ? (
+              <div className="space-y-3">
+                <p className="text-red-600 dark:text-red-400">
+                  Are you sure? This will delete all monitored folders and scan history.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleReset}
+                    className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+                  >
+                    Yes, Reset Everything
+                  </button>
+                  <button
+                    onClick={() => setShowConfirmReset(false)}
+                    className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowConfirmReset(true)}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+              >
+                Reset Database
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -225,9 +225,16 @@ function App() {
     <div className={`min-h-screen bg-background-light dark:bg-background-dark transition-colors duration-200`}>
       <header className="p-4 border-b border-gray-200 dark:border-gray-700">
         <div className="container mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <HardDrive className="w-6 h-6 text-primary-light dark:text-primary-dark" />
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Storage Monitor</h1>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <HardDrive className="w-6 h-6 text-primary-light dark:text-primary-dark" />
+              <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Storage Monitor</h1>
+            </div>
+            {scanStatus?.lastScanTime && (
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Last scan: {new Date(scanStatus.lastScanTime).toLocaleString()}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {scanStatus?.isScanning && (
