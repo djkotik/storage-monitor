@@ -1,4 +1,5 @@
 import React from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Moon, Sun, Maximize2, HardDrive, FileType2, Files, Copy, PieChart, FolderTree as FolderTreeIcon, RefreshCw, Settings as SettingsIcon, AlertCircle } from 'lucide-react';
 import { useThemeStore } from './store/theme';
 import { StorageChart } from './components/StorageChart';
@@ -11,7 +12,6 @@ import { FullscreenModal } from './components/FullscreenModal';
 import { formatBytes } from './utils/format';
 import { SettingsModal } from './components/SettingsModal';
 import { ScanStatusModal } from './components/ScanStatusModal';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 function App() {
   const { isDark, toggleTheme } = useThemeStore();
@@ -33,6 +33,7 @@ function App() {
 
   const queryClient = useQueryClient();
 
+  // Optimize polling intervals based on scan status
   const { data: scanStatus } = useQuery({
     queryKey: ['scanStatus'],
     queryFn: async () => {
@@ -40,7 +41,8 @@ function App() {
       if (!response.ok) throw new Error('Failed to fetch scan status');
       return response.json();
     },
-    refetchInterval: 1000,
+    refetchInterval: (data) => data?.isScanning ? 1000 : 5000,
+    refetchIntervalInBackground: true,
   });
 
   const { data: storageStats, isLoading: isLoadingStats } = useQuery({
@@ -50,7 +52,8 @@ function App() {
       if (!response.ok) throw new Error('Failed to fetch storage stats');
       return response.json();
     },
-    refetchInterval: 5000,
+    refetchInterval: (data) => data?.initializing || scanStatus?.isScanning ? 5000 : 30000,
+    refetchIntervalInBackground: true,
   });
 
   const { data: storageHistory, isLoading: isLoadingHistory } = useQuery({
@@ -64,6 +67,8 @@ function App() {
         usedSize: item.used_size,
       }));
     },
+    refetchInterval: scanStatus?.isScanning ? 5000 : 30000,
+    refetchIntervalInBackground: true,
   });
 
   const { data: fileTypes } = useQuery({
@@ -73,6 +78,8 @@ function App() {
       if (!response.ok) throw new Error('Failed to fetch file types');
       return response.json();
     },
+    refetchInterval: scanStatus?.isScanning ? 5000 : 30000,
+    refetchIntervalInBackground: true,
   });
 
   const { data: duplicateFiles } = useQuery({
@@ -82,6 +89,8 @@ function App() {
       if (!response.ok) throw new Error('Failed to fetch duplicates');
       return response.json();
     },
+    refetchInterval: scanStatus?.isScanning ? 5000 : 30000,
+    refetchIntervalInBackground: true,
   });
 
   const { data: monitoredFolders } = useQuery({
@@ -91,6 +100,8 @@ function App() {
       if (!response.ok) throw new Error('Failed to fetch folders');
       return response.json();
     },
+    refetchInterval: scanStatus?.isScanning ? 5000 : 30000,
+    refetchIntervalInBackground: true,
   });
 
   const handleScanIntervalChange = async (interval: number) => {
@@ -116,12 +127,18 @@ function App() {
         body: JSON.stringify({ path }),
       });
       
-      if (!response.ok) throw new Error('Failed to add folder');
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to add folder');
+      }
+      
       const { id } = await response.json();
       setFolders(prev => [...prev, { id, path }]);
       queryClient.invalidateQuery({ queryKey: ['monitoredFolders'] });
+      setIsAddFolderOpen(false);
     } catch (error) {
       console.error('Error adding folder:', error);
+      alert(error instanceof Error ? error.message : 'Failed to add folder');
     }
   };
 
@@ -136,6 +153,7 @@ function App() {
       queryClient.invalidateQuery({ queryKey: ['monitoredFolders'] });
     } catch (error) {
       console.error('Error deleting folder:', error);
+      throw error;
     }
   };
 
@@ -150,6 +168,7 @@ function App() {
       setIsScanStatusOpen(true);
     } catch (error) {
       console.error('Error refreshing data:', error);
+      alert('Failed to start scan. Please try again.');
     }
   };
 

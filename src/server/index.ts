@@ -6,9 +6,14 @@ import { open } from 'sqlite';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { statfs } from 'fs/promises';
+import PQueue from 'p-queue';
+import type { Dirent } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Create a queue for background tasks
+const queue = new PQueue({ concurrency: 1 });
 
 // Global variables
 let db: any;
@@ -37,6 +42,10 @@ function log(level: 'info' | 'error' | 'warn', message: string) {
     message
   };
   scanProgress.logs.push(logEntry);
+  // Keep only the last 1000 log entries
+  if (scanProgress.logs.length > 1000) {
+    scanProgress.logs = scanProgress.logs.slice(-1000);
+  }
   console.log(`[${logEntry.timestamp}] ${level.toUpperCase()}: ${message}`);
 }
 
@@ -59,6 +68,12 @@ async function initializeDatabase() {
       filename: DB_PATH,
       driver: sqlite3.Database
     });
+
+    // Enable WAL mode for better concurrent access
+    await db.exec('PRAGMA journal_mode = WAL');
+    await db.exec('PRAGMA synchronous = NORMAL');
+    await db.exec('PRAGMA temp_store = MEMORY');
+    await db.exec('PRAGMA cache_size = -2000'); // Use 2MB of memory for cache
 
     log('info', 'Database connection established');
 
@@ -96,6 +111,9 @@ async function initializeDatabase() {
         size INTEGER NOT NULL,
         paths TEXT NOT NULL
       );
+
+      CREATE INDEX IF NOT EXISTS idx_file_stats_parent_folder ON file_stats(parent_folder);
+      CREATE INDEX IF NOT EXISTS idx_storage_history_folder_id ON storage_history(folder_id);
     `);
 
     scanProgress.initializing = false;
@@ -140,8 +158,7 @@ async function scanDirectory(dirPath: string, folderId: string): Promise<{ size:
     }
 
     const files = await fs.readdir(dirPath, { withFileTypes: true });
-    
-    for (const file of files) {
+    const processFile = async (file: Dirent) => {
       const fullPath = path.join(dirPath, file.name);
       
       try {
@@ -149,26 +166,44 @@ async function scanDirectory(dirPath: string, folderId: string): Promise<{ size:
         
         if (stats.isDirectory()) {
           const { size, items } = await scanDirectory(fullPath, folderId);
-          totalSize += size;
-          totalItems += items;
+          return { size, items };
         } else {
-          totalSize += stats.size;
-          totalItems++;
-          scanProgress.scannedItems++;
-          
           await db.run(
             'INSERT OR REPLACE INTO file_stats (path, name, size, type, modified, parent_folder) VALUES (?, ?, ?, ?, ?, ?)',
             [fullPath, file.name, stats.size, path.extname(file.name) || 'unknown', stats.mtime.toISOString(), dirPath]
           );
+          return { size: stats.size, items: 1 };
         }
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EACCES') {
           const errorMsg = `Permission denied: ${fullPath}`;
           scanProgress.errors.push(errorMsg);
           log('error', errorMsg);
-          continue;
+        } else {
+          log('error', `Error scanning ${fullPath}: ${error instanceof Error ? error.message : String(error)}`);
         }
-        log('error', `Error scanning ${fullPath}: ${error instanceof Error ? error.message : String(error)}`);
+        return { size: 0, items: 0 };
+      }
+    };
+
+    // Process files in batches of 100
+    const batchSize = 100;
+    for (let i = 0; i < files.length; i += batchSize) {
+      const batch = files.slice(i, i + batchSize);
+      const results = await Promise.all(batch.map(processFile));
+      
+      for (const result of results) {
+        totalSize += result.size;
+        totalItems += result.items;
+        scanProgress.scannedItems += result.items;
+      }
+
+      // Update progress periodically
+      if (i % 1000 === 0) {
+        await db.run(
+          'UPDATE monitored_folders SET size = ?, items = ? WHERE id = ?',
+          [totalSize, totalItems, folderId]
+        );
       }
     }
 
@@ -267,7 +302,6 @@ app.get('/api/files/duplicates', async (_req, res) => {
           paths: JSON.parse(d.paths)
         };
       } catch (error) {
-        // If JSON parsing fails, return an empty array for paths
         return {
           ...d,
           paths: []
@@ -322,14 +356,19 @@ app.post('/api/folders', async (req, res) => {
         [id, folderPath, new Date().toISOString()]
       );
       
-      scanProgress.isScanning = true;
-      const { size, items } = await scanDirectory(folderPath, id);
-      scanProgress.isScanning = false;
-      
-      await db.run(
-        'UPDATE monitored_folders SET size = ?, items = ? WHERE id = ?',
-        [size, items, id]
-      );
+      // Add scan to queue instead of running immediately
+      queue.add(async () => {
+        scanProgress.isScanning = true;
+        try {
+          const { size, items } = await scanDirectory(folderPath, id);
+          await db.run(
+            'UPDATE monitored_folders SET size = ?, items = ? WHERE id = ?',
+            [size, items, id]
+          );
+        } finally {
+          scanProgress.isScanning = false;
+        }
+      });
       
       await db.run('COMMIT');
       log('info', `Successfully added folder: ${folderPath}`);
@@ -339,7 +378,6 @@ app.post('/api/folders', async (req, res) => {
       throw error;
     }
   } catch (error) {
-    scanProgress.isScanning = false;
     log('error', `Failed to add folder: ${error instanceof Error ? error.message : String(error)}`);
     res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to add folder' });
   }
@@ -358,9 +396,12 @@ app.delete('/api/folders/:id', async (req, res) => {
         return res.status(404).json({ error: 'Folder not found' });
       }
       
-      await db.run('DELETE FROM file_stats WHERE parent_folder = ?', [folder.path]);
-      await db.run('DELETE FROM storage_history WHERE folder_id = ?', [id]);
-      await db.run('DELETE FROM monitored_folders WHERE id = ?', [id]);
+      // Add deletion to queue
+      queue.add(async () => {
+        await db.run('DELETE FROM file_stats WHERE parent_folder = ?', [folder.path]);
+        await db.run('DELETE FROM storage_history WHERE folder_id = ?', [id]);
+        await db.run('DELETE FROM monitored_folders WHERE id = ?', [id]);
+      });
       
       await db.run('COMMIT');
       log('info', `Successfully deleted folder with ID: ${id}`);
@@ -382,51 +423,56 @@ app.post('/api/scan', async (_req, res) => {
     }
 
     log('info', 'Starting manual scan of all folders');
-    scanProgress.isScanning = true;
-    scanProgress.scannedItems = 0;
-    scanProgress.errors = [];
-
-    const folders = await db.all('SELECT * FROM monitored_folders');
     
-    for (const folder of folders) {
-      try {
-        await scanDirectory(folder.path, folder.id);
-      } catch (error) {
-        log('error', `Error scanning folder ${folder.path}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+    // Add scan to queue
+    queue.add(async () => {
+      scanProgress.isScanning = true;
+      scanProgress.scannedItems = 0;
+      scanProgress.errors = [];
 
-    scanProgress.isScanning = false;
-    log('info', 'Manual scan completed');
+      try {
+        const folders = await db.all('SELECT * FROM monitored_folders');
+        for (const folder of folders) {
+          try {
+            await scanDirectory(folder.path, folder.id);
+          } catch (error) {
+            log('error', `Error scanning folder ${folder.path}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      } finally {
+        scanProgress.isScanning = false;
+      }
+    });
+
+    log('info', 'Scan queued');
     res.json({ success: true });
   } catch (error) {
-    scanProgress.isScanning = false;
     log('error', `Failed to start scan: ${error instanceof Error ? error.message : String(error)}`);
     res.status(500).json({ error: 'Failed to start scan' });
   }
 });
 
-// Add reset endpoint
 app.post('/api/reset', async (_req, res) => {
   try {
     log('info', 'Resetting database...');
     
-    await db.run('BEGIN TRANSACTION');
+    // Add reset to queue
+    queue.add(async () => {
+      await db.run('BEGIN TRANSACTION');
+      try {
+        await db.run('DELETE FROM file_stats');
+        await db.run('DELETE FROM storage_history');
+        await db.run('DELETE FROM duplicate_files');
+        await db.run('DELETE FROM monitored_folders');
+        await db.run('COMMIT');
+        log('info', 'Database reset successful');
+      } catch (error) {
+        await db.run('ROLLBACK');
+        throw error;
+      }
+    });
     
-    try {
-      // Delete all data from tables
-      await db.run('DELETE FROM file_stats');
-      await db.run('DELETE FROM storage_history');
-      await db.run('DELETE FROM duplicate_files');
-      await db.run('DELETE FROM monitored_folders');
-      
-      await db.run('COMMIT');
-      log('info', 'Database reset successful');
-      res.json({ success: true });
-    } catch (error) {
-      await db.run('ROLLBACK');
-      throw error;
-    }
+    res.json({ success: true });
   } catch (error) {
     log('error', `Failed to reset database: ${error instanceof Error ? error.message : String(error)}`);
     res.status(500).json({ error: 'Failed to reset database' });
